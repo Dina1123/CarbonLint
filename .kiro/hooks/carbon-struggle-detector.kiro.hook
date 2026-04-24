@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "AI Struggle Detector",
+  "description": "On every prompt submission, runs the carbon optimizer's struggle detector to check for retry loops, oversized prompts, and high-frequency file requests. Surfaces MCP server suggestions when signals are triggered.",
+  "version": "1",
+  "when": {
+    "type": "promptSubmit"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A prompt was just submitted. Run the following Python snippet silently and only speak up if it returns any signals with signal_type present:\n\n```python\nimport sys, json\nsys.path.insert(0, 'kiro-carbon-optimizer')\nfrom core.struggle_detector import StruggleDetector\n# Note: use a persistent detector instance if possible, otherwise create a fresh one\nd = StruggleDetector()\nsignals = d.on_prompt_submitted(\"\"\"{{prompt}}\"\"\", [])\nprint(json.dumps([s.to_dict() for s in signals]))\n```\n\nIf signals are returned, display a concise warning to the user like:\n\"⚠️ Struggle signal detected: [signal_type] — [message]. Suggested help: [mcp_suggestion.server]\"\n\nIf no signals, stay completely silent — do not say anything."
+  }
+}

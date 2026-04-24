@@ -1,0 +1,81 @@
+name: carbon-aware-code-optimizer
+version: "1.0.0"
+description: >
+  A Kiro-native agent that analyzes Python source code for inefficiencies,
+  estimates its carbon footprint via sandboxed execution, generates optimized
+  versions, and produces a structured before-vs-after comparison report.
+
+tools:
+  - name: analyze_efficiency
+    description: >
+      Parse Python source code, compute cyclomatic complexity per function,
+      detect nested loops and repeated sub-expressions, and return a structured
+      AnalysisResult with issues sorted by severity.
+    entry_point: tools/analyze.py::analyze_efficiency
+    input:
+      type: object
+      required: [code, language]
+      properties:
+        code:
+          type: string
+          description: Python source code to analyze.
+        language:
+          type: string
+          description: Programming language of the source code (e.g. "python").
+    output:
+      schema: AnalysisResult
+
+  - name: estimate_carbon
+    description: >
+      Execute the provided Python code in an isolated sandbox, measure
+      wall-clock time, peak memory, energy consumption, and CO₂ emissions,
+      and return a Metrics object.
+    entry_point: tools/measure.py::estimate_carbon
+    input:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Python source code to profile and measure.
+    output:
+      schema: Metrics
+
+  - name: optimize_code
+    description: >
+      Apply rule-based AST transformation passes (loop reduction, expression
+      hoisting, memoization, algorithmic substitution) to the provided Python
+      code and return an OptimizationResult with the transformed code and a
+      list of applied changes.
+    entry_point: tools/optimize.py::optimize_code
+    input:
+      type: object
+      required: [code, goal]
+      properties:
+        code:
+          type: string
+          description: Python source code to optimize.
+        goal:
+          type: string
+          description: Optimization goal, e.g. "reduce_energy".
+    output:
+      schema: OptimizationResult
+
+  - name: compare_versions
+    description: >
+      Compare original and optimized Metrics objects, compute percentage
+      improvements for execution time, memory, and CO₂ emissions, and return
+      a Comparison with a human-readable summary.
+    entry_point: tools/optimize.py::compare_versions
+    input:
+      type: object
+      required: [original, optimized]
+      properties:
+        original:
+          type: object
+          description: Metrics object from the original code execution.
+        optimized:
+          type: object
+          description: Metrics object from the optimized code execution.
+    output:
+      schema: Comparison

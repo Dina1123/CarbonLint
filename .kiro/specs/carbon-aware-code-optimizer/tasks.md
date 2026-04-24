@@ -1,0 +1,373 @@
+# Implementation Plan: Carbon-Aware Code Optimizer
+
+## Overview
+
+Implement the Carbon-Aware Code Optimizer as a Kiro-native Python agent. The implementation follows the layered architecture: project scaffolding → sandbox → analyzer → carbon estimator → optimizer → comparator → agent pipeline → struggle detector → config analyzer → tests.
+
+## Tasks
+
+- [x] 1. Project scaffolding
+  - Create the `kiro-carbon-optimizer/` directory structure with all subdirectories: `tools/`, `core/`, `sandbox/`, `tests/unit/`, `tests/property/`, `tests/integration/`
+  - Write `requirements.txt` with pinned versions for: `radon`, `codecarbon`, `hypothesis`, `pytest`, `scikit-learn` (TF-IDF), `pyyaml`, `tomllib` (stdlib 3.11+)
+  - Write `kiro.yaml` declaring the four tool entry points (`analyze_efficiency`, `estimate_carbon`, `optimize_code`, `compare_versions`) and their descriptions
+  - Create empty `__init__.py` files in `core/`, `sandbox/`, `tools/`, and each `tests/` subdirectory
+  - _Requirements: 6.1, 8.1_
+
+- [x] 2. Data models (`core/models.py`)
+  - [x] 2.1 Define all dataclasses and TypedDicts: `Metrics`, `Issue`, `AnalysisResult`, `FunctionInfo`, `OptimizationResult`, `Change`, `Comparison`, `Report`, `ErrorResponse`, `StruggleSignal`, `ConfigIssue`
+    - Use `@dataclass` with type annotations for all models
+    - Add `to_dict()` / `from_dict()` helpers for JSON serialisation
+    - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
+  - [ ]* 2.2 Write unit tests for model serialisation round-trips
+    - Verify `to_dict(from_dict(d)) == d` for each model
+    - _Requirements: 8.1–8.6_
+
+- [x] 3. Sandbox (`sandbox/executor.py`)
+  - [x] 3.1 Implement `execute(code, timeout_s, memory_limit_bytes) -> ExecutionResult | ErrorResponse`
+    - Spawn subprocess using `multiprocessing` with `start_method="spawn"`
+    - Install custom `__import__` hook enforcing the module allowlist before any import resolves
+    - Call `resource.setrlimit(RLIMIT_AS, ...)` inside the child to enforce the memory cap
+    - Create temp working dir via `tempfile.mkdtemp()`; clean up in a `finally` block
+    - Override `socket.socket` inside the child to block all network access
+    - Communicate results back to parent via `multiprocessing.Queue`; detect child absence on timeout and construct `ErrorResponse`
+    - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
+  - [x]* 3.2 Write unit tests for sandbox isolation
+    - Test: allowlisted import succeeds; non-allowlisted import raises `ImportError`
+    - Test: network access attempt returns error
+    - Test: temp dir is removed after execution (success, exception, and timeout cases)
+    - Test: memory-exceeded code returns `MemoryExceededError` response
+    - _Requirements: 3.1–3.5_
+  - [ ]* 3.3 Write property test for sandbox blocks non-allowlisted imports (Property 8)
+    - **Property 8: Sandbox blocks non-allowlisted imports**
+    - **Validates: Requirements 3.4**
+  - [ ]* 3.4 Write property test for sandbox filesystem isolation (Property 9)
+    - **Property 9: Sandbox filesystem isolation**
+    - **Validates: Requirements 3.1**
+  - [ ]* 3.5 Write property test for sandbox resource cleanup (Property 10)
+    - **Property 10: Sandbox resource cleanup**
+    - **Validates: Requirements 3.3**
+
+- [x] 4. Checkpoint — sandbox baseline
+  - Ensure all sandbox unit tests pass. Ask the user if questions arise.
+
+- [x] 5. Analyzer (`core/ast_analyzer.py`, `core/complexity.py`)
+  - [x] 5.1 Implement `analyze_efficiency(code: str) -> AnalysisResult | ErrorResponse` in `core/ast_analyzer.py`
+    - Parse code with `ast.parse()`; return `ErrorResponse` on empty string or `SyntaxError`
+    - Walk AST to detect nested `For`/`While` nodes at depth ≥ 2; record line numbers as `Issue` objects
+    - Detect repeated identical `ast.expr` subtrees inside loop bodies; record as `Issue` objects
+    - Sort issues by `complexity_score` descending before returning
+    - Record `parse_time_ms` using `time.perf_counter()`
+    - _Requirements: 1.1, 1.3, 1.4, 1.5, 1.6_
+  - [x] 5.2 Implement `compute_complexity(code: str) -> list[FunctionInfo]` in `core/complexity.py`
+    - Use `radon.complexity.cc_visit()` to compute cyclomatic complexity per function
+    - Return list of `FunctionInfo` with `name`, `complexity_score`, `line_start`, `line_end`
+    - _Requirements: 1.2_
+  - [x] 5.3 Wire `compute_complexity` into `analyze_efficiency` so `functions` list is populated
+    - _Requirements: 1.2, 1.6_
+  - [ ]* 5.4 Write unit tests for analyzer
+    - Test: valid code with N functions returns exactly N entries in `functions`
+    - Test: nested loop at depth 2 produces a nested-loop `Issue`
+    - Test: no nested loops → no nested-loop issue
+    - Test: repeated sub-expression inside loop → sub-expression `Issue`
+    - Test: empty string → `ErrorResponse`
+    - Test: syntax-error code → `ErrorResponse` with no partial results
+    - Test: issues list is sorted by `complexity_score` descending
+    - _Requirements: 1.1–1.6_
+  - [ ]* 5.5 Write property test for complexity score completeness (Property 1)
+    - **Property 1: Complexity score completeness**
+    - **Validates: Requirements 1.2**
+  - [ ]* 5.6 Write property test for nested-loop issue detection (Property 2)
+    - **Property 2: Nested-loop issue detection**
+    - **Validates: Requirements 1.3**
+  - [ ]* 5.7 Write property test for issues list sorted by severity (Property 3)
+    - **Property 3: Issues list is sorted by severity**
+    - **Validates: Requirements 1.6**
+  - [ ]* 5.8 Write property test for invalid input yields error with no partial results (Property 4)
+    - **Property 4: Invalid input yields error with no partial results**
+    - **Validates: Requirements 1.5**
+
+- [x] 6. Carbon Estimator (`core/profiler.py`, `core/carbon.py`)
+  - [x] 6.1 Implement `profile_execution(code: str, sandbox_fn) -> dict` in `core/profiler.py`
+    - Wrap sandbox call with `time.perf_counter()` to capture wall-clock time in ms
+    - Use `tracemalloc` (or `resource.getrusage(RUSAGE_CHILDREN)`) to capture peak memory in bytes
+    - Return raw timing and memory dict; propagate `ErrorResponse` from sandbox unchanged
+    - _Requirements: 2.2, 2.3_
+  - [x] 6.2 Implement `estimate_carbon(code: str) -> Metrics | ErrorResponse` in `core/carbon.py`
+    - Call `profile_execution` to get timing and memory
+    - Wrap sandbox execution with `codecarbon.EmissionsTracker` to derive `energy_kwh` and `co2_grams`
+    - Enforce 5-second timeout; return `TimeoutError` response if exceeded
+    - Return complete `Metrics` object; return `ErrorResponse` if sandbox raises
+    - _Requirements: 2.1, 2.4, 2.5, 2.6_
+  - [ ]* 6.3 Write unit tests for carbon estimator
+    - Test: valid code returns all four `Metrics` fields as non-negative numbers
+    - Test: code raising an exception returns `ErrorResponse` with exception type
+    - Test: `sleep(10)` code returns timeout `ErrorResponse`
+    - Test: large allocation code returns memory-exceeded `ErrorResponse`
+    - _Requirements: 2.1–2.7_
+  - [ ]* 6.4 Write property test for metrics schema completeness (Property 5)
+    - **Property 5: Metrics schema completeness**
+    - **Validates: Requirements 2.2, 2.3, 2.4**
+  - [ ]* 6.5 Write property test for exception in sandbox yields error with no partial Metrics (Property 6)
+    - **Property 6: Exception in sandbox yields error with no partial Metrics**
+    - **Validates: Requirements 2.5**
+  - [ ]* 6.6 Write property test for metrics determinism across repeated runs (Property 7)
+    - **Property 7: Metrics determinism across repeated runs**
+    - **Validates: Requirements 2.7**
+
+- [x] 7. Checkpoint — analysis and estimation baseline
+  - Ensure all analyzer and carbon estimator tests pass. Ask the user if questions arise.
+
+- [x] 8. Optimizer (`core/ast_analyzer.py` — transformation passes)
+  - [x] 8.1 Implement `LoopReductionPass` — flatten or vectorize nested loops where safe
+    - Walk AST for nested `For`/`While` nodes; replace with flattened equivalent where the inner loop body has no dependencies on outer loop variables beyond the iteration variable
+    - After transformation: call `ast.unparse()` then `ast.parse()`; discard pass on any exception
+    - _Requirements: 4.2, 7.1, 7.2_
+  - [x] 8.2 Implement `ExpressionHoistingPass` — hoist loop-invariant sub-expressions
+    - Detect `ast.expr` subtrees inside loop bodies that do not reference the loop variable; assign to a temp variable before the loop
+    - AST round-trip validation after transformation
+    - _Requirements: 4.3, 7.1, 7.2_
+  - [x] 8.3 Implement `MemoizationPass` — wrap pure functions with `functools.lru_cache`
+    - Detect function calls inside loop bodies where the callee is a module-level `def` with no side effects; add `@functools.lru_cache` decorator
+    - AST round-trip validation after transformation
+    - _Requirements: 4.3, 7.1, 7.2_
+  - [x] 8.4 Implement `AlgorithmicSubstitutionPass` — replace O(n²) list membership with set lookups
+    - Detect `x in list_var` inside loop bodies where `list_var` is assigned a list literal or list comprehension; replace with `x in set(list_var)` hoisted before the loop
+    - AST round-trip validation after transformation
+    - _Requirements: 4.4, 7.1, 7.2_
+  - [x] 8.5 Implement `optimize_code(code: str, goal: str = "reduce_energy") -> OptimizationResult | ErrorResponse`
+    - Apply all four passes in order; accumulate `Change` objects for each applied pass
+    - Return original code unchanged with empty `changes` and `expected_improvement_percent=0` if no pass applies
+    - Return `ErrorResponse` on `SyntaxError` in input
+    - _Requirements: 4.1, 4.5, 4.6, 4.7_
+  - [ ]* 8.6 Write unit tests for optimizer
+    - Test: nested-loop code → `LoopReductionPass` fires, change recorded
+    - Test: loop-invariant expression → `ExpressionHoistingPass` fires
+    - Test: repeated pure function call in loop → `MemoizationPass` fires
+    - Test: `x in list` in loop → `AlgorithmicSubstitutionPass` fires
+    - Test: no optimizable patterns → original code returned, empty changes, improvement=0
+    - Test: each pass discards transformation when re-parse fails (inject a broken AST)
+    - _Requirements: 4.1–4.7_
+  - [ ]* 8.7 Write property test for optimizer output schema completeness (Property 11)
+    - **Property 11: Optimizer output schema completeness**
+    - **Validates: Requirements 4.1**
+  - [ ]* 8.8 Write property test for every applied change has a human-readable description (Property 12)
+    - **Property 12: Every applied change has a human-readable description**
+    - **Validates: Requirements 4.7**
+  - [ ]* 8.9 Write property test for optimizer preserves behavioral equivalence (Property 13)
+    - **Property 13: Optimizer preserves behavioral equivalence**
+    - **Validates: Requirements 4.5**
+  - [ ]* 8.10 Write property test for AST round-trip — optimized code is always valid Python (Property 14)
+    - **Property 14: AST round-trip — optimized code is always valid Python**
+    - **Validates: Requirements 7.2**
+
+- [x] 9. Comparator (`core/comparator.py`)
+  - [x] 9.1 Implement `compare_versions(original: Metrics, optimized: Metrics) -> Comparison | ErrorResponse`
+    - Validate both `Metrics` objects have all four required fields; return `ErrorResponse` naming the missing field if not
+    - Compute `improvement = round(((original_val - optimized_val) / original_val) * 100, 2)` for each metric
+    - Generate `summary` string containing CO₂ reduction in grams and CO₂ improvement percentage
+    - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
+  - [ ]* 9.2 Write unit tests for comparator
+    - Test: valid pair returns all three improvement percentages and non-empty summary
+    - Test: optimized value greater than original → negative improvement percentage
+    - Test: missing field in original → `ErrorResponse` naming the field
+    - Test: missing field in optimized → `ErrorResponse` naming the field
+    - Test: formula correctness with known values
+    - _Requirements: 5.1–5.5_
+  - [ ]* 9.3 Write property test for comparison formula correctness (Property 15)
+    - **Property 15: Comparison formula correctness**
+    - **Validates: Requirements 5.2, 5.3**
+  - [ ]* 9.4 Write property test for comparison summary is non-empty and contains CO₂ values (Property 16)
+    - **Property 16: Comparison summary is non-empty and contains CO₂ values**
+    - **Validates: Requirements 5.4**
+  - [ ]* 9.5 Write property test for missing Metrics field yields error identifying the field (Property 17)
+    - **Property 17: Missing Metrics field yields error identifying the field**
+    - **Validates: Requirements 5.5**
+
+- [x] 10. Checkpoint — core components complete
+  - Ensure all optimizer and comparator tests pass. Ask the user if questions arise.
+
+- [x] 11. Agent pipeline (`tools/analyze.py`, `tools/measure.py`, `tools/optimize.py`)
+  - [x] 11.1 Implement `run_pipeline(code: str) -> Report` in `tools/optimize.py`
+    - Step 1: call `analyze_efficiency(code)`
+    - Step 2: call `estimate_carbon(code)` → `original_metrics`
+    - Step 3: call `optimize_code(code, goal="reduce_energy")` → `optimized_code`
+    - Step 4: call `estimate_carbon(optimized_code)` → `optimized_metrics`
+    - Step 5: call `compare_versions(original_metrics, optimized_metrics)` → `comparison`
+    - On any `ErrorResponse` at step N, immediately return a `PipelineError` response naming the failed tool; do not invoke steps > N
+    - Pass the original `code` string byte-for-byte to both `optimize_code` and the first `estimate_carbon`
+    - Assemble and return `Report` on success
+    - _Requirements: 6.1, 6.2, 6.3, 6.4_
+  - [x] 11.2 Expose `analyze_efficiency` as a standalone callable in `tools/analyze.py` (thin wrapper)
+    - _Requirements: 6.1_
+  - [x] 11.3 Expose `estimate_carbon` as a standalone callable in `tools/measure.py` (thin wrapper)
+    - _Requirements: 6.1_
+  - [ ]* 11.4 Write unit tests for agent pipeline
+    - Test: successful run returns `Report` with all five fields populated
+    - Test: `analyze_efficiency` error → pipeline halts at step 1, returns `PipelineError`
+    - Test: first `estimate_carbon` error → pipeline halts at step 2
+    - Test: `optimize_code` error → pipeline halts at step 3
+    - Test: second `estimate_carbon` error → pipeline halts at step 4
+    - Test: code passed to `optimize_code` is identical to code passed to first `estimate_carbon`
+    - _Requirements: 6.1–6.4_
+  - [ ]* 11.5 Write property test for pipeline executes tools in fixed order (Property 18)
+    - **Property 18: Pipeline executes tools in fixed order**
+    - **Validates: Requirements 6.1**
+  - [ ]* 11.6 Write property test for pipeline code immutability (Property 19)
+    - **Property 19: Pipeline code immutability**
+    - **Validates: Requirements 6.4**
+  - [ ]* 11.7 Write property test for pipeline error halts at failing step (Property 20)
+    - **Property 20: Pipeline error halts at failing step**
+    - **Validates: Requirements 6.3**
+  - [ ]* 11.8 Write property test for all tool outputs conform to their JSON schemas (Property 21)
+    - **Property 21: All tool outputs conform to their JSON schemas**
+    - **Validates: Requirements 8.1, 8.2, 8.3, 8.4, 8.5**
+  - [ ]* 11.9 Write property test for error responses always contain required error fields (Property 22)
+    - **Property 22: Error responses always contain required error fields**
+    - **Validates: Requirements 8.6**
+
+- [x] 12. Checkpoint — pipeline wired end-to-end
+  - Ensure all pipeline unit and property tests pass. Ask the user if questions arise.
+
+- [x] 13. Struggle Detector (`core/struggle_detector.py`, `core/diff_tracker.py`, `core/mcp_suggester.py`)
+  - [x] 13.1 Implement `DiffTracker` class in `core/diff_tracker.py`
+    - `record_edit(file_path: str, line_range: tuple[int, int]) -> None` — store edit events
+    - `check_repeated_region(file_path: str, line_range: tuple[int, int]) -> bool` — return `True` if overlapping edits ≥ 3 for this file+region
+    - _Requirements: 9.9, 9.10_
+  - [x] 13.2 Implement `MCP_Suggester` class in `core/mcp_suggester.py`
+    - Define the struggle-type-to-server mapping dict (API confusion → Context7 MCP, AWS issue → AWS Docs MCP, database schema → project docs, repeated file edits → workspace context, package usage → documentation MCP)
+    - `suggest(signal_type: str) -> dict` — return the matching MCP server recommendation
+    - _Requirements: 9.13_
+  - [x] 13.3 Implement `StruggleDetector` class in `core/struggle_detector.py`
+    - `on_prompt_submitted(prompt: str, file_refs: list[str]) -> list[StruggleSignal]`
+      - Append prompt to in-memory history buffer
+      - Compute TF-IDF cosine similarity against all previous prompts using `sklearn.feature_extraction.text.TfidfVectorizer`; flag repeated-prompt signal if similarity ≥ 0.80
+      - Estimate token count as `ceil(len(prompt) / 4)`; flag oversized-prompt signal if > 1500
+      - Hash pasted content blocks; flag repeated-content-pasting signal if same hash appears in ≥ 2 prompts
+      - Increment per-file request counter with timestamp; flag high-frequency-retry signal if count ≥ 7 in rolling 10-minute window
+    - `on_edit_generated(file_path: str, line_range: tuple[int, int]) -> list[StruggleSignal]`
+      - Delegate to `DiffTracker.record_edit`; flag repeated-region-edit signal if `check_repeated_region` returns `True`
+    - `on_edit_reverted(file_path: str) -> list[StruggleSignal]`
+      - Increment rejection counter for file; flag repeated-rejection signal and escalate to high severity if counter ≥ 3
+    - For each raised signal, call `MCP_Suggester.suggest` and attach recommendation to `StruggleSignal`
+    - Return empty list when no signals are triggered
+    - _Requirements: 9.1–9.14_
+  - [ ]* 13.4 Write unit tests for struggle detector
+    - Test: two identical prompts → repeated-prompt signal raised
+    - Test: two dissimilar prompts → no signal
+    - Test: prompt length > 6000 chars → oversized-prompt signal (token estimate > 1500)
+    - Test: same file referenced 7 times in 10 minutes → high-frequency signal
+    - Test: same file referenced 6 times → no signal
+    - Test: same content hash in 2 prompts → repeated-content signal
+    - Test: 3 rejection events for same file → repeated-rejection signal at high severity
+    - Test: no signals → empty list returned
+    - _Requirements: 9.1–9.14_
+  - [ ]* 13.5 Write unit tests for `DiffTracker`
+    - Test: 3 overlapping edits on same file/region → `True`
+    - Test: 2 overlapping edits → `False`
+    - Test: non-overlapping edits → `False`
+    - _Requirements: 9.9, 9.10_
+  - [ ]* 13.6 Write unit tests for `MCP_Suggester`
+    - Test each mapping key returns the correct server name
+    - _Requirements: 9.13_
+  - [ ]* 13.7 Write property test for prompt history accumulates all submitted prompts (Property 23)
+    - **Property 23: Prompt history accumulates all submitted prompts**
+    - **Validates: Requirements 9.1**
+  - [ ]* 13.8 Write property test for cosine similarity threshold triggers repeated-prompt signal (Property 24)
+    - **Property 24: Cosine similarity threshold triggers repeated-prompt signal**
+    - **Validates: Requirements 9.2, 9.3**
+  - [ ]* 13.9 Write property test for token estimate formula correctness (Property 25)
+    - **Property 25: Token estimate formula correctness**
+    - **Validates: Requirements 9.6, 9.7**
+  - [ ]* 13.10 Write property test for high-frequency file reference threshold (Property 26)
+    - **Property 26: High-frequency file reference threshold**
+    - **Validates: Requirements 9.4, 9.5**
+  - [ ]* 13.11 Write property test for repeated-region edit threshold (Property 27)
+    - **Property 27: Repeated-region edit threshold**
+    - **Validates: Requirements 9.9, 9.10**
+  - [ ]* 13.12 Write property test for rejection counter escalation (Property 28)
+    - **Property 28: Rejection counter escalation**
+    - **Validates: Requirements 9.11, 9.12**
+  - [ ]* 13.13 Write property test for MCP suggestion mapping correctness (Property 29)
+    - **Property 29: MCP suggestion mapping correctness**
+    - **Validates: Requirements 9.13**
+
+- [x] 14. Config Analyzer (`core/config_analyzer.py`)
+  - [x] 14.1 Implement Dockerfile parser
+    - Line-by-line regex parser; extract `FROM`, `COPY`, `RUN` instructions
+    - Detect: unpinned base image tag (`latest` or no tag), `COPY . .` before dependency install, absent `AS` keyword (no multi-stage build), `npm install`/`npm ci` without `--omit=dev`
+    - _Requirements: 10.2, 10.4, 10.5, 10.6_
+  - [x] 14.2 Implement `.dockerignore` presence check
+    - Check for `.dockerignore` in same directory as `Dockerfile`; flag missing-dockerignore `Issue` if absent
+    - _Requirements: 10.3_
+  - [x] 14.3 Implement `vercel.json` and `netlify.toml` parsers
+    - Parse `vercel.json` with `json.loads`; parse `netlify.toml` with `tomllib.loads`
+    - Detect always-on preview environment config without inactivity timeout; flag `always-on-preview` `Issue`
+    - Return `ParseError` `ErrorResponse` on malformed file; continue scanning remaining files
+    - _Requirements: 10.8, 10.11_
+  - [x] 14.4 Implement GitHub Actions workflow parser
+    - Use `yaml.safe_load` to parse files under `.github/workflows/`
+    - Detect `schedule` triggers with cron interval < 15 minutes; flag `high-frequency-cron` `Issue`
+    - Return `ParseError` `ErrorResponse` on malformed YAML; continue scanning
+    - _Requirements: 10.7, 10.11_
+  - [x] 14.5 Implement `analyze_configs(workspace_root: str) -> list[ConfigIssue] | ErrorResponse`
+    - Scan for all supported config files; call each parser
+    - Collect all `ConfigIssue` objects; sort by `carbon_impact_score` descending (HIGH > MEDIUM > LOW)
+    - Return empty list if no config files found
+    - Ensure each `ConfigIssue` has non-empty `remediation` and `example_fix` fields
+    - _Requirements: 10.1, 10.9, 10.10, 10.12_
+  - [ ]* 14.6 Write unit tests for config analyzer
+    - Test: Dockerfile with `latest` tag → unpinned-base-image issue
+    - Test: Dockerfile without `.dockerignore` → missing-dockerignore issue
+    - Test: `COPY . .` before `RUN pip install` → suboptimal-copy-order issue
+    - Test: no `FROM ... AS` → missing-multistage-build issue
+    - Test: `npm install` without `--omit=dev` → dev-dependencies-included issue
+    - Test: cron `*/5 * * * *` → high-frequency-cron issue
+    - Test: always-on preview without timeout → always-on-preview issue
+    - Test: issues sorted HIGH before MEDIUM before LOW
+    - Test: malformed YAML file → `ParseError` returned, other files still scanned
+    - Test: empty workspace → empty list, no warnings
+    - Test: every returned issue has non-empty `remediation` and `example_fix`
+    - _Requirements: 10.1–10.12_
+  - [ ]* 14.7 Write property test for config issue detection for all Dockerfile patterns (Property 30)
+    - **Property 30: Config issue detection for all Dockerfile patterns**
+    - **Validates: Requirements 10.2, 10.3, 10.4, 10.5, 10.6**
+  - [ ]* 14.8 Write property test for config issues list is sorted by carbon impact (Property 31)
+    - **Property 31: Config issues list is sorted by carbon impact**
+    - **Validates: Requirements 10.9**
+  - [ ]* 14.9 Write property test for config parse error does not halt remaining file scans (Property 32)
+    - **Property 32: Config parse error does not halt remaining file scans**
+    - **Validates: Requirements 10.11**
+  - [ ]* 14.10 Write property test for every config issue includes remediation and example fix (Property 33)
+    - **Property 33: Every config issue includes remediation and example fix**
+    - **Validates: Requirements 10.12**
+
+- [x] 15. Checkpoint — all components implemented
+  - Ensure all unit tests pass across all components. Ask the user if questions arise.
+
+- [x] 16. Integration tests
+  - [x] 16.1 Write full pipeline integration test (`tests/integration/test_pipeline_integration.py`)
+    - Run `run_pipeline` with a real Python code sample (e.g., a function with a nested loop and list membership test)
+    - Assert `Report` contains all five fields with non-null, schema-conformant values
+    - Assert `co2_improvement_pct` is a finite number
+    - _Requirements: 6.1, 6.2_
+  - [x] 16.2 Write sandbox isolation integration test (`tests/integration/test_sandbox_isolation.py`)
+    - Test: code attempting `open("/etc/passwd")` returns filesystem-access error
+    - Test: code attempting `import socket; socket.connect(...)` returns network-access error
+    - Test: code attempting `import os` returns `ImportError`
+    - _Requirements: 3.1, 3.2, 3.4_
+  - [x] 16.3 Write config analyzer integration test (`tests/integration/test_config_analyzer_integration.py`)
+    - Create a temp workspace with a `Dockerfile`, `.github/workflows/ci.yml`, and `vercel.json`
+    - Run `analyze_configs` and assert issues are returned for each planted pattern
+    - Assert issues are sorted by `carbon_impact_score` descending
+    - _Requirements: 10.1, 10.9_
+
+- [x] 17. Final checkpoint — all tests pass
+  - Ensure all unit, property, and integration tests pass. Ask the user if questions arise.
+
+## Notes
+
+- Tasks marked with `*` are optional and can be skipped for a faster MVP
+- Each task references specific requirements for traceability
+- All 33 correctness properties from the design are covered by property test sub-tasks (Properties 1–33)
+- Checkpoints ensure incremental validation at each architectural layer
+- The sandbox must be implemented and validated before the carbon estimator, as the estimator depends on it
