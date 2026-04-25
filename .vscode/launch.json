@@ -6,10 +6,11 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}/CarbonLint/carbon-optimizer-extension"
+        "--extensionDevelopmentPath=${workspaceFolder}/carbon-optimizer-extension",
+        "${workspaceFolder}"
       ],
       "outFiles": [
-        "${workspaceFolder}/CarbonLint/carbon-optimizer-extension/out/**/*.js"
+        "${workspaceFolder}/carbon-optimizer-extension/out/**/*.js"
       ]
     }
   ]
