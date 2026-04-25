@@ -32,10 +32,10 @@ export class DiagnosticProvider {
   // Store issues per URI for hover provider access
   private issueMap = new Map<string, Issue[]>();
 
-  constructor(private readonly bridge: Bridge) {
+  constructor(private readonly bridge: Bridge, outputChannel?: vscode.OutputChannel) {
     this.collection = vscode.languages.createDiagnosticCollection('carbon-optimizer');
     this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-    this.outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+    this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Carbon Optimizer');
   }
 
   register(context: vscode.ExtensionContext): void {

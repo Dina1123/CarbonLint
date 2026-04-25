@@ -20,8 +20,9 @@ export class ConfigScanner {
   constructor(
     private readonly bridge: Bridge,
     private readonly reportPanel: ReportPanel,
+    outputChannel?: vscode.OutputChannel,
   ) {
-    this.outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+    this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Carbon Optimizer');
   }
 
   /**

@@ -32,8 +32,9 @@ export class Bridge {
   constructor(
     private readonly pythonPath: string,
     private readonly serverScriptPath: string,
+    outputChannel?: vscode.OutputChannel,
   ) {
-    this.outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+    this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Carbon Optimizer');
   }
 
   async start(): Promise<void> {

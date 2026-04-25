@@ -19,11 +19,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // ── 2. Instantiate components ────────────────────────────────────────────
-  bridge = new Bridge(pythonPath, serverScriptPath);
-  const diagnosticProvider = new DiagnosticProvider(bridge);
+  const outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+  context.subscriptions.push(outputChannel);
+
+  bridge = new Bridge(pythonPath, serverScriptPath, outputChannel);
+  const diagnosticProvider = new DiagnosticProvider(bridge, outputChannel);
   const struggleTracker = new StruggleTracker();
   const reportPanel = new ReportPanel(bridge, context.extensionPath);
-  const configScanner = new ConfigScanner(bridge, reportPanel);
+  const configScanner = new ConfigScanner(bridge, reportPanel, outputChannel);
 
   // ── 3. Start the backend ─────────────────────────────────────────────────
   try {
@@ -64,7 +67,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // ── 7. Struggle detection on save ────────────────────────────────────────
-  const outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
   context.subscriptions.push(
     vscode.workspace.onDidSaveTextDocument(async (document) => {
       if (document.languageId !== 'python') return;

@@ -50,11 +50,13 @@ async function activate(context) {
     // Resolve the backend server script path relative to the extension
     const serverScriptPath = path.join(context.extensionPath, '..', 'kiro-carbon-optimizer', 'backend_server.py');
     // ── 2. Instantiate components ────────────────────────────────────────────
-    bridge = new bridge_1.Bridge(pythonPath, serverScriptPath);
-    const diagnosticProvider = new diagnosticProvider_1.DiagnosticProvider(bridge);
+    const outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+    context.subscriptions.push(outputChannel);
+    bridge = new bridge_1.Bridge(pythonPath, serverScriptPath, outputChannel);
+    const diagnosticProvider = new diagnosticProvider_1.DiagnosticProvider(bridge, outputChannel);
     const struggleTracker = new struggleTracker_1.StruggleTracker();
     const reportPanel = new reportPanel_1.ReportPanel(bridge, context.extensionPath);
-    const configScanner = new configScanner_1.ConfigScanner(bridge, reportPanel);
+    const configScanner = new configScanner_1.ConfigScanner(bridge, reportPanel, outputChannel);
     // ── 3. Start the backend ─────────────────────────────────────────────────
     try {
         await bridge.start();
@@ -85,7 +87,6 @@ async function activate(context) {
         },
     }));
     // ── 7. Struggle detection on save ────────────────────────────────────────
-    const outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
     context.subscriptions.push(vscode.workspace.onDidSaveTextDocument(async (document) => {
         if (document.languageId !== 'python')
             return;

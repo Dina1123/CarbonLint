@@ -45,13 +45,13 @@ function mapSeverity(severity) {
     }
 }
 class DiagnosticProvider {
-    constructor(bridge) {
+    constructor(bridge, outputChannel) {
         this.bridge = bridge;
         // Store issues per URI for hover provider access
         this.issueMap = new Map();
         this.collection = vscode.languages.createDiagnosticCollection('carbon-optimizer');
         this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
-        this.outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+        this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Carbon Optimizer');
     }
     register(context) {
         context.subscriptions.push(vscode.workspace.onDidSaveTextDocument((doc) => {

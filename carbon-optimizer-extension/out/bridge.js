@@ -38,7 +38,7 @@ const child_process_1 = require("child_process");
 const uuid_1 = require("uuid");
 const vscode = __importStar(require("vscode"));
 class Bridge {
-    constructor(pythonPath, serverScriptPath) {
+    constructor(pythonPath, serverScriptPath, outputChannel) {
         this.pythonPath = pythonPath;
         this.serverScriptPath = serverScriptPath;
         this.process = null;
@@ -47,7 +47,7 @@ class Bridge {
         this.buffer = '';
         this.disposed = false;
         this.MAX_RESTARTS = 3;
-        this.outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+        this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Carbon Optimizer');
     }
     async start() {
         if (this.disposed)

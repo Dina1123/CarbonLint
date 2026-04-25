@@ -36,12 +36,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ConfigScanner = void 0;
 const vscode = __importStar(require("vscode"));
 class ConfigScanner {
-    constructor(bridge, reportPanel) {
+    constructor(bridge, reportPanel, outputChannel) {
         this.bridge = bridge;
         this.reportPanel = reportPanel;
         /** Set of workspace folder URI strings already scanned this session. */
         this.hasScanned = new Set();
-        this.outputChannel = vscode.window.createOutputChannel('Carbon Optimizer');
+        this.outputChannel = outputChannel ?? vscode.window.createOutputChannel('Carbon Optimizer');
     }
     /**
      * Register workspace folder listeners and scan any already-open folders.
