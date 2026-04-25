@@ -42,14 +42,17 @@ class ReportPanel {
         this.bridge = bridge;
         this.extensionPath = extensionPath;
         this.lastHtml = '';
+        this._webviewReady = false;
     }
-    show(activeDocument) {
+    show() {
         if (this.panel) {
             this.panel.reveal();
+            this._updateContent();
         }
         else {
+            this._webviewReady = false;
+            this._pendingContent = undefined;
             this.panel = vscode.window.createWebviewPanel('carbonOptimizerReport', 'Carbon Optimizer Report', vscode.ViewColumn.Beside, { enableScripts: true });
-            // Load the HTML template
             const htmlPath = path.join(this.extensionPath, 'media', 'report.html');
             let html;
             try {
@@ -59,24 +62,47 @@ class ReportPanel {
                 html = this._fallbackHtml();
             }
             this.panel.webview.html = html;
-            // Handle messages from the WebView
             this.panel.webview.onDidReceiveMessage((message) => {
-                if (message.command === 'optimize') {
-                    this._runOptimize(activeDocument);
+                if (message.command === 'ready') {
+                    this._webviewReady = true;
+                    if (this._pendingContent !== undefined) {
+                        this.panel?.webview.postMessage({ command: 'setContent', html: this._pendingContent });
+                        this._pendingContent = undefined;
+                    }
+                    else {
+                        this._updateContent();
+                    }
+                }
+                else if (message.command === 'optimize') {
+                    this._runOptimize();
                 }
             });
             this.panel.onDidDispose(() => {
                 this.panel = undefined;
+                this._webviewReady = false;
+                this._pendingContent = undefined;
             });
         }
-        if (!activeDocument || activeDocument.languageId !== 'python') {
-            this._setContent(this._noFileHtml());
-            return;
-        }
-        // Show optimize button
-        this._setContent(this._optimizeButtonHtml());
     }
-    async _runOptimize(document) {
+    _getActivePythonDocument() {
+        const active = vscode.window.activeTextEditor;
+        if (active?.document.languageId === 'python') {
+            return active.document;
+        }
+        // Webview panels steal focus, so also check all visible editors
+        return vscode.window.visibleTextEditors.find((e) => e.document.languageId === 'python')?.document;
+    }
+    _updateContent() {
+        const doc = this._getActivePythonDocument();
+        if (!doc) {
+            this._setContent(this._noFileHtml());
+        }
+        else {
+            this._setContent(this._optimizeButtonHtml());
+        }
+    }
+    async _runOptimize() {
+        const document = this._getActivePythonDocument();
         if (!document) {
             this._setContent(this._noFileHtml());
             return;
@@ -160,6 +186,10 @@ class ReportPanel {
     }
     _setContent(html) {
         this.lastHtml = html;
+        if (!this._webviewReady) {
+            this._pendingContent = html;
+            return;
+        }
         this.panel?.webview.postMessage({ command: 'setContent', html });
     }
     _noFileHtml() {
@@ -174,6 +204,7 @@ class ReportPanel {
       <div id="content"></div>
       <script>
         const vscode = acquireVsCodeApi();
+        vscode.postMessage({ command: 'ready' });
         document.addEventListener('click', e => {
           if (e.target && e.target.id === 'optimize-btn') vscode.postMessage({ command: 'optimize' });
         });

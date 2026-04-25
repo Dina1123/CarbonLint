@@ -42,8 +42,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // ── 5. Register command: carbonOptimizer.openReport ──────────────────────
   context.subscriptions.push(
     vscode.commands.registerCommand('carbonOptimizer.openReport', () => {
-      const activeDoc = vscode.window.activeTextEditor?.document;
-      reportPanel.show(activeDoc);
+      reportPanel.show();
     }),
   );
 

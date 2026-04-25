@@ -68,8 +68,7 @@ async function activate(context) {
     configScanner.register(context);
     // ── 5. Register command: carbonOptimizer.openReport ──────────────────────
     context.subscriptions.push(vscode.commands.registerCommand('carbonOptimizer.openReport', () => {
-        const activeDoc = vscode.window.activeTextEditor?.document;
-        reportPanel.show(activeDoc);
+        reportPanel.show();
     }));
     // ── 6. Register HoverProvider for Python files ───────────────────────────
     context.subscriptions.push(vscode.languages.registerHoverProvider('python', {

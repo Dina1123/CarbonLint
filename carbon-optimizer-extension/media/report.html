@@ -78,7 +78,8 @@
   </div>
   <script>
     const vscode = acquireVsCodeApi();
-    
+    vscode.postMessage({ command: 'ready' });
+
     document.addEventListener('click', (e) => {
       if (e.target && e.target.id === 'optimize-btn') {
         e.target.disabled = true;
