@@ -1,0 +1,66 @@
+{
+  "name": "carbon-optimizer",
+  "displayName": "Carbon Optimizer",
+  "description": "Analyzes Python code for carbon inefficiencies, estimates footprint, and suggests optimizations.",
+  "version": "0.1.0",
+  "publisher": "carbon-optimizer",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": ["onLanguage:python"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "carbonOptimizer.openReport",
+        "title": "Carbon Optimizer: Open Report"
+      }
+    ],
+    "configuration": {
+      "title": "Carbon Optimizer",
+      "properties": {
+        "carbonOptimizer.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "description": "Path to the Python executable used to run the Carbon Optimizer backend."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "jest",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.7",
+    "@types/vscode": "^1.85.0",
+    "fast-check": "^3.15.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.2",
+    "typescript": "^5.3.3",
+    "@vscode/vsce": "^2.24.0"
+  },
+  "dependencies": {
+    "uuid": "^9.0.1"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^vscode$": "<rootDir>/__mocks__/vscode.ts"
+    },
+    "testMatch": [
+      "**/src/__tests__/**/*.test.ts"
+    ],
+    "globals": {
+      "ts-jest": {
+        "tsconfig": "tsconfig.json"
+      }
+    }
+  }
+}

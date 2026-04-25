@@ -1,0 +1,11 @@
+src/**
+__mocks__/**
+node_modules/**
+.vscode/**
+*.map
+tsconfig.json
+jest.config.*
+**/*.test.ts
+**/*.property.test.ts
+.gitkeep
+**/.gitkeep
